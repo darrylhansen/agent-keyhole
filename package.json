@@ -1,0 +1,13 @@
+{
+  "name": "agent-keyhole",
+  "version": "1.0.0",
+  "description": "**A Trust-Boundary for LLM Agents.** \r Your agent never holds your real credentials.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs"
+}
