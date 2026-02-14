@@ -1,13 +1,50 @@
 {
   "name": "agent-keyhole",
   "version": "1.0.0",
-  "description": "**A Trust-Boundary for LLM Agents.** \r Your agent never holds your real credentials.",
-  "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+  "description": "A trust boundary for LLM agents. Your agent never holds your real credentials.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "keyhole": "bin/keyhole.js"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "files": [
+    "dist/",
+    "bin/",
+    "templates/"
+  ],
+  "os": [
+    "darwin",
+    "linux"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "node --test",
+    "lint": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "js-yaml": "^4.1.0"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.5.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "agent",
+    "llm",
+    "security",
+    "credentials",
+    "proxy",
+    "sidecar",
+    "trust-boundary",
+    "mcp",
+    "ai-agent"
+  ],
+  "license": "MIT",
   "type": "commonjs"
 }

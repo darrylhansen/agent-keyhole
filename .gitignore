@@ -31,6 +31,9 @@ lerna-debug.log*
 coverage/
 .nyc_output
 
+# Claude Dev
+.specs/
+
 # OS Files
 .DS_Store
 Thumbs.db
