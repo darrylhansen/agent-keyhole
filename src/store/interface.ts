@@ -13,4 +13,7 @@ export interface SecretStore {
 
   /** Check if a secret exists without retrieving it */
   has(ref: string): Promise<boolean>;
+
+  /** Batch store multiple secrets (optional — falls back to sequential set()) */
+  setMany?(entries: [ref: string, value: string][], passphrase?: string): Promise<void>;
 }

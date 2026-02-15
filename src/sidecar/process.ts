@@ -7,6 +7,7 @@ import { VaultStore, createStore } from '../store/vault.js';
 import { startIPCServer, stopIPCServer, updateServerHandlers } from './ipc-server.js';
 import { RequestBuilder } from './request-builder.js';
 import { ResponseMasker } from './response-masker.js';
+import { SecretRegistry } from './secret-registry.js';
 import { AuditLogger } from './audit-logger.js';
 import { sendBootAlert } from './alerting.js';
 import type { ParsedConfig } from '../config/schema.js';
@@ -104,7 +105,7 @@ async function bootstrap(msg: BootstrapMessage): Promise<void> {
 
   // 3. Create request builder and response masker
   builder = new RequestBuilder(config, secrets);
-  masker = new ResponseMasker(config, secrets);
+  masker = new ResponseMasker(config, buildRegistry(config, secrets));
 
   // 4. Start IPC server
   const agentServices = buildAgentServicesMap(config, msg.agent);
@@ -162,7 +163,7 @@ async function handleUnlock(msg: UnlockMessage): Promise<void> {
 
     await resolveSecrets();
     builder = new RequestBuilder(config, secrets);
-    masker = new ResponseMasker(config, secrets);
+    masker = new ResponseMasker(config, buildRegistry(config, secrets));
     updateServerHandlers(builder, masker);
 
     state = 'ready';
@@ -181,6 +182,18 @@ async function shutdown(): Promise<void> {
   state = 'shutting_down';
   logger.info('sidecar.shutdown');
   await stopIPCServer(socketPath);
+}
+
+function buildRegistry(
+  cfg: ParsedConfig,
+  secretsMap: Map<string, string>
+): SecretRegistry {
+  const placeholders = new Set(
+    Object.values(cfg.services).map(
+      (s) => s.placeholder || 'KEYHOLE_MANAGED'
+    )
+  );
+  return new SecretRegistry(secretsMap, placeholders);
 }
 
 function buildAgentServicesMap(

@@ -13,6 +13,7 @@ export interface AuditLogEntry {
   redacted?: boolean;
   redaction_count?: number;
   redaction_layers?: string[];
+  keys?: string[];
   agent?: string;
   error?: string;
 }

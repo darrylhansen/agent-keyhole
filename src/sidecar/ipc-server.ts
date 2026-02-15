@@ -242,6 +242,7 @@ async function handleRequest(
     );
 
     let responseMsg: KeyholeResponse;
+    let redactionLayers: string[] | undefined;
 
     if (isBinary) {
       responseMsg = {
@@ -255,10 +256,9 @@ async function handleRequest(
       };
     } else {
       const rawBody = rawBuffer.toString('utf-8');
-      const { body: maskedBody, redacted } = _masker.maskBody(
-        rawBody,
-        request.service
-      );
+      const { body: maskedBody, redacted, layers, heuristicKeys } =
+        _masker.maskBody(rawBody, request.service);
+      redactionLayers = layers;
       responseMsg = {
         id: request.id,
         status: upstreamResponse.status,
@@ -267,6 +267,14 @@ async function handleRequest(
         bodyEncoding: 'utf8',
         redacted
       };
+
+      if (heuristicKeys.length > 0) {
+        logger.warn('response.heuristic_redaction', {
+          service: request.service,
+          keys: heuristicKeys,
+          redaction_count: heuristicKeys.length,
+        });
+      }
     }
 
     const duration = Date.now() - startTime;
@@ -278,6 +286,7 @@ async function handleRequest(
       status: upstreamResponse.status,
       duration_ms: duration,
       redacted: responseMsg.redacted,
+      redaction_layers: redactionLayers,
       agent: request.agent
     });
 

@@ -54,6 +54,14 @@ export class KeychainStore implements SecretStore {
     }
   }
 
+  async setMany(
+    entries: [ref: string, value: string][]
+  ): Promise<void> {
+    for (const [ref, value] of entries) {
+      await this.set(ref, value);
+    }
+  }
+
   // --- macOS (Keychain Access) ---
 
   private macGet(ref: string): string {

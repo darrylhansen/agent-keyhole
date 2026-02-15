@@ -1,5 +1,5 @@
 # keyhole.yaml – Agent-Keyhole configuration
-# Documentation: https://github.com/agent-keyhole/agent-keyhole
+# Documentation: https://github.com/darrylhansen/agent-keyhole
 
 services:
   github:
@@ -8,33 +8,35 @@ services:
     auth:
       type: bearer
       secret_ref: github-token
-    placeholder: "KEYHOLE_MANAGED"
-    sdk_env:
-      GITHUB_TOKEN: "{{placeholder}}"
     headers:
       Accept: application/vnd.github+json
       X-GitHub-Api-Version: "2022-11-28"
-    response_masking:
-      patterns:
-        - "ghp_[A-Za-z0-9_]{36}"
-        - "gho_[A-Za-z0-9_]{36}"
-        - "ghs_[A-Za-z0-9_]{36}"
-      json_paths:
-        - "$.token"
-        - "$.credentials.access_token"
+    # Response masking is automatic — no configuration needed.
+    # Keyhole detects and redacts known secrets and credential-like values.
 
-  openai:
-    domains:
-      - api.openai.com
-    auth:
-      type: bearer
-      secret_ref: openai-api-key
-    placeholder: "sk-keyhole-000000000000000000000000000000000000000000000000"
-    sdk_env:
-      OPENAI_API_KEY: "{{placeholder}}"
-    response_masking:
-      patterns:
-        - "sk-[A-Za-z0-9]{20,}"
+    # Optional: Only needed with autoPatch mode so SDKs see a fake key in process.env
+    # sdk_env:
+    #   GITHUB_TOKEN: "{{placeholder}}"
+    # Optional: Fake key format for SDKs that validate key format (default: KEYHOLE_MANAGED)
+    # placeholder: "KEYHOLE_MANAGED"
+
+    # Optional: Manual response masking overrides (rarely needed)
+    # response_masking:
+    #   patterns:
+    #     - "ghp_[A-Za-z0-9_]{36}"
+    #   json_paths:
+    #     - "$.token"
+
+  # openai:
+  #   domains:
+  #     - api.openai.com
+  #   auth:
+  #     type: bearer
+  #     secret_ref: openai-api-key
+  #   # OpenAI SDK validates key format, so placeholder must look like a real key
+  #   placeholder: "sk-keyhole-000000000000000000000000000000000000000000000000"
+  #   sdk_env:
+  #     OPENAI_API_KEY: "{{placeholder}}"
 
   # anthropic:
   #   domains:

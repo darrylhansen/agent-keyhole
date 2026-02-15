@@ -1,8 +1,15 @@
 import fs from 'fs';
-import path from 'path';
-import readline from 'readline';
 import { loadConfig } from '../config/loader.js';
-import { KeychainStore } from '../store/keychain.js';
+import { createStore, VaultStore } from '../store/vault.js';
+import type { SecretStore } from '../store/interface.js';
+import {
+  promptSecret,
+  promptConfirm,
+  getConfigPath,
+  getVaultPath,
+  createVaultInteractive,
+  NO_STORE_GUIDANCE
+} from './shared.js';
 
 export async function addCommand(args: string[]): Promise<void> {
   const serviceName = args.find((a) => !a.startsWith('-'));
@@ -26,6 +33,43 @@ export async function addCommand(args: string[]): Promise<void> {
   }
 
   const secretRef = service.auth.secret_ref;
+  const vaultPath = getVaultPath(args);
+
+  // Obtain a secret store
+  let store: SecretStore;
+  let vaultPassphrase: string | undefined;
+
+  try {
+    store = await createStore({ vaultPath });
+  } catch {
+    // No keychain and no vault — offer to create one inline
+    console.error('No OS keychain detected and no vault found.');
+    const create = await promptConfirm('Create an encrypted vault now? (Y/n): ');
+    if (!create) {
+      console.error(NO_STORE_GUIDANCE);
+      process.exit(1);
+    }
+
+    try {
+      vaultPassphrase = await createVaultInteractive(vaultPath);
+      store = await createStore({ store: 'vault', vaultPath });
+      await (store as VaultStore).unlock(vaultPassphrase);
+    } catch (err: any) {
+      console.error(`Error: ${err.message}`);
+      process.exit(1);
+    }
+  }
+
+  // If store is a vault and we haven't unlocked it yet, prompt for passphrase
+  if (store instanceof VaultStore && !vaultPassphrase) {
+    vaultPassphrase = await promptSecret('Enter vault passphrase: ');
+    try {
+      await store.unlock(vaultPassphrase);
+    } catch (err: any) {
+      console.error(`Error: ${err.message}`);
+      process.exit(1);
+    }
+  }
 
   console.error(`Service: ${serviceName}`);
   console.error(`Secret ref: ${secretRef} (from keyhole.yaml)`);
@@ -37,42 +81,15 @@ export async function addCommand(args: string[]): Promise<void> {
     process.exit(1);
   }
 
-  const store = new KeychainStore();
-  await store.set(secretRef, value);
-  console.error(`✔ Stored "${secretRef}" in OS keychain`);
+  await store.set(secretRef, value, vaultPassphrase);
+  const storeName = store instanceof VaultStore ? 'vault' : 'OS keychain';
+  console.error(`Stored "${secretRef}" in ${storeName}`);
 
   // Verify
   try {
     await store.get(secretRef);
-    console.error('✔ Verified: secret is retrievable');
+    console.error('Verified: secret is retrievable');
   } catch {
-    console.error('⚠ Warning: could not verify secret retrieval');
+    console.error('Warning: could not verify secret retrieval');
   }
-}
-
-async function promptSecret(prompt: string): Promise<string> {
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stderr,
-    terminal: true
-  });
-
-  return new Promise((resolve) => {
-    // Hide input by using a question with terminal mode
-    (rl as any).output?.write(prompt);
-    (rl as any)._writeToOutput = function () {};
-    rl.question('', (answer) => {
-      (rl as any).output?.write('\n');
-      rl.close();
-      resolve(answer);
-    });
-  });
-}
-
-function getConfigPath(args: string[]): string {
-  const configIdx = args.indexOf('--config');
-  if (configIdx !== -1 && args[configIdx + 1]) {
-    return path.resolve(args[configIdx + 1]);
-  }
-  return path.resolve('keyhole.yaml');
 }

@@ -14,7 +14,8 @@ export type {
   ServiceConfig,
   AuthConfig,
   AgentConfig,
-  ParsedConfig
+  ParsedConfig,
+  HeuristicConfig
 } from './config/schema.js';
 
 export interface KeyholeOptions {
@@ -46,7 +47,7 @@ export interface KeyholeOptions {
 export interface RedactionEvent {
   service: string;
   path: string;
-  layer: 'header' | 'known_secret' | 'pattern' | 'json_path';
+  layer: 'header' | 'known_secret' | 'heuristic' | 'pattern' | 'json_path';
   count: number;
 }
 

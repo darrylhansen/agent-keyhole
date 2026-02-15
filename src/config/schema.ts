@@ -41,6 +41,14 @@ export interface ResponseMaskingConfig {
   json_paths?: string[];
   streaming?: 'stream' | 'buffer';
   streaming_window_cap?: number;
+  heuristic?: HeuristicConfig;
+}
+
+export interface HeuristicConfig {
+  enabled?: boolean;
+  min_length?: number;
+  min_entropy?: number;
+  additional_key_names?: string[];
 }
 
 export interface AgentConfig {

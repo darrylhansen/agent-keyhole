@@ -1,9 +1,9 @@
 import fs from 'fs';
-import path from 'path';
+import crypto from 'crypto';
 import { loadConfig } from '../config/loader.js';
 import { spawnSidecar } from '../client/spawn.js';
 import { IPCClient } from '../client/ipc-client.js';
-import crypto from 'crypto';
+import { getConfigPath, NO_STORE_GUIDANCE } from './shared.js';
 
 export async function testCommand(args: string[]): Promise<void> {
   const serviceName = args.find((a) => !a.startsWith('-'));
@@ -34,10 +34,14 @@ export async function testCommand(args: string[]): Promise<void> {
     handle = await spawnSidecar(config);
   } catch (err: any) {
     console.error(`Error starting sidecar: ${err.message}`);
+    if (err.message.includes('No secret store')) {
+      console.error('');
+      console.error(NO_STORE_GUIDANCE);
+    }
     process.exit(1);
   }
 
-  console.error(`✔ Sidecar ready (PID ${handle.child.pid})\n`);
+  console.error(`Sidecar ready (PID ${handle.child.pid})\n`);
 
   const ipc = new IPCClient(handle.socketPath, handle.ott);
   await ipc.connect();
@@ -60,13 +64,14 @@ export async function testCommand(args: string[]): Promise<void> {
         bodyEncoding: 'utf8'
       });
 
-      console.error(`→ GET ${testPath} → ${response.status} ${response.status < 400 ? 'OK' : 'FAIL'} ${response.status < 400 ? '✔' : '✗'}`);
+      const ok = response.status < 400;
+      console.error(`GET ${testPath} -> ${response.status} ${ok ? 'OK' : 'FAIL'}`);
 
-      if (response.status >= 400) {
+      if (!ok) {
         allPassed = false;
       }
     } catch (err: any) {
-      console.error(`→ ERROR: ${err.message} ✗`);
+      console.error(`ERROR: ${err.message}`);
       allPassed = false;
     }
   }
@@ -91,7 +96,6 @@ function getTestPath(
   name: string,
   service: any
 ): string {
-  // Common test endpoints for known services
   const testPaths: Record<string, string> = {
     github: '/user',
     openai: '/v1/models',
@@ -101,12 +105,4 @@ function getTestPath(
   };
 
   return testPaths[name] || '/';
-}
-
-function getConfigPath(args: string[]): string {
-  const configIdx = args.indexOf('--config');
-  if (configIdx !== -1 && args[configIdx + 1]) {
-    return path.resolve(args[configIdx + 1]);
-  }
-  return path.resolve('keyhole.yaml');
 }

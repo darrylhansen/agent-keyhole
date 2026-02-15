@@ -4,6 +4,7 @@ import { removeCommand } from './remove.js';
 import { listCommand } from './list.js';
 import { testCommand } from './test.js';
 import { vaultCommand } from './vault.js';
+import { migrateCommand } from './migrate.js';
 
 const VERSION = '1.0.0';
 
@@ -28,6 +29,9 @@ export async function runCLI(args: string[]): Promise<void> {
       break;
     case 'vault':
       await vaultCommand(args.slice(1));
+      break;
+    case 'migrate':
+      await migrateCommand(args.slice(1));
       break;
     case 'version':
     case '--version':
@@ -63,10 +67,13 @@ Commands:
   vault add <service>     Add/update a secret in the vault
   vault remove <service>  Remove a secret from the vault
   vault list              List secrets in the vault (names only)
+  migrate                 Import secrets from .env files into Keyhole store
   help                    Show this help
   version                 Show version
 
 Options:
   --config <path>         Path to keyhole.yaml (default: ./keyhole.yaml)
+  --dry-run               (migrate) Show what would be imported without writing
+  --no-cleanup            (migrate) Import secrets but don't modify source files
 `);
 }

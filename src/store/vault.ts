@@ -142,6 +142,18 @@ export class VaultStore implements SecretStore {
     return this.secrets.has(ref);
   }
 
+  async setMany(
+    entries: [ref: string, value: string][],
+    passphrase?: string
+  ): Promise<void> {
+    if (!passphrase) throw new Error('Passphrase required to save vault');
+    if (!this.secrets) await this.unlock(passphrase);
+    for (const [ref, value] of entries) {
+      this.secrets!.set(ref, value);
+    }
+    await this.saveVault(passphrase);
+  }
+
   get isLocked(): boolean {
     return this.secrets === null;
   }

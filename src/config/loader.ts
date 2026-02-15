@@ -188,6 +188,40 @@ function validateConfig(config: KeyholeConfig): void {
       }
     }
 
+    // Validate heuristic config
+    if (service.response_masking?.heuristic) {
+      const h = service.response_masking.heuristic;
+      if (h.enabled !== undefined && typeof h.enabled !== 'boolean') {
+        throw new Error(
+          `Service "${name}" has invalid heuristic.enabled: must be boolean`
+        );
+      }
+      if (h.min_length !== undefined) {
+        if (typeof h.min_length !== 'number' || h.min_length < 1 || !Number.isInteger(h.min_length)) {
+          throw new Error(
+            `Service "${name}" has invalid heuristic.min_length: must be a positive integer`
+          );
+        }
+      }
+      if (h.min_entropy !== undefined) {
+        if (typeof h.min_entropy !== 'number' || h.min_entropy <= 0) {
+          throw new Error(
+            `Service "${name}" has invalid heuristic.min_entropy: must be a positive number`
+          );
+        }
+      }
+      if (h.additional_key_names !== undefined) {
+        if (
+          !Array.isArray(h.additional_key_names) ||
+          !h.additional_key_names.every((k: any) => typeof k === 'string')
+        ) {
+          throw new Error(
+            `Service "${name}" has invalid heuristic.additional_key_names: must be string array`
+          );
+        }
+      }
+    }
+
     if (service.sdk_env) {
       for (const [envVar, template] of Object.entries(service.sdk_env)) {
         if (template.includes('{{') && !template.includes('{{placeholder}}')) {

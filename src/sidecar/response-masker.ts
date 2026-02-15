@@ -1,14 +1,15 @@
-import type { ParsedConfig } from '../config/schema.js';
-import { maskJsonPaths } from './json-path-redactor.js';
+import type { ParsedConfig, HeuristicConfig } from '../config/schema.js';
+import { SecretRegistry } from './secret-registry.js';
+import { shouldRedactHeuristic } from './heuristic-detector.js';
+import { redactJsonPaths } from './json-path-redactor.js';
 import type { AuditLogger } from './audit-logger.js';
 
 const REDACTION_MARKER = '[REDACTED BY KEYHOLE]';
-const MIN_SECRET_LENGTH = 8;
 
 /** Default cap for unbounded regex quantifiers in streaming mode */
 const DEFAULT_STREAMING_WINDOW_CAP = 200;
 
-/** Maximum size of the JSON path accumulator before L4 is skipped (OOM protection) */
+/** Maximum size of the accumulator before deferred masking is skipped (OOM protection) */
 const MAX_ACCUMULATOR_SIZE = 10 * 1024 * 1024; // 10MB
 
 // --- Layer 1: Header Scrubbing ---
@@ -39,116 +40,206 @@ function scrubHeaders(
   return clean;
 }
 
-// --- Layer 2: Known-Secret Body Scan ---
-
-function maskKnownSecrets(
-  body: string,
-  injectedSecrets: string[]
-): { body: string; redacted: boolean } {
-  let masked = body;
-  let redacted = false;
-
-  for (const secret of injectedSecrets) {
-    if (secret.length < MIN_SECRET_LENGTH) continue;
-
-    // Plain text match
-    if (masked.includes(secret)) {
-      masked = masked.replaceAll(secret, REDACTION_MARKER);
-      redacted = true;
-    }
-
-    // Base64-encoded match
-    const b64 = Buffer.from(secret).toString('base64');
-    if (masked.includes(b64)) {
-      masked = masked.replaceAll(b64, REDACTION_MARKER);
-      redacted = true;
-    }
-
-    // URL-encoded match
-    const urlEncoded = encodeURIComponent(secret);
-    if (urlEncoded !== secret && masked.includes(urlEncoded)) {
-      masked = masked.replaceAll(urlEncoded, REDACTION_MARKER);
-      redacted = true;
-    }
-  }
-
-  return { body: masked, redacted };
-}
-
-// --- Layer 3: Pattern-Based Redaction ---
-
-function maskPatterns(
-  body: string,
-  patterns: string[]
-): { body: string; redacted: boolean } {
-  let masked = body;
-  let redacted = false;
-
-  for (const pattern of patterns) {
-    const before = masked;
-    masked = masked.replace(new RegExp(pattern, 'g'), REDACTION_MARKER);
-    if (masked !== before) {
-      redacted = true;
-    }
-  }
-
-  return { body: masked, redacted };
-}
-
 // --- Combined Masking Pipeline ---
+
+export interface MaskBodyResult {
+  body: string;
+  redacted: boolean;
+  layers: string[];
+  heuristicKeys: string[];
+}
 
 export class ResponseMasker {
   private config: ParsedConfig;
-  private injectedSecrets: string[];
-  private placeholders: Set<string>;
+  private registry: SecretRegistry;
 
-  constructor(config: ParsedConfig, secrets: Map<string, string>) {
+  constructor(config: ParsedConfig, registry: SecretRegistry) {
     this.config = config;
-    this.injectedSecrets = Array.from(secrets.values());
-
-    // Placeholder values should NOT be redacted
-    this.placeholders = new Set(
-      Object.values(config.services).map(
-        (s) => s.placeholder || 'KEYHOLE_MANAGED'
-      )
-    );
+    this.registry = registry;
   }
 
   scrubHeaders(headers: Record<string, string>): Record<string, string> {
     return scrubHeaders(headers);
   }
 
-  maskBody(
-    body: string,
-    serviceName: string
-  ): { body: string; redacted: boolean } {
-    let result = body;
+  maskBody(body: string, serviceName: string): MaskBodyResult {
     let anyRedacted = false;
-
-    // Layer 2: Known secrets (excluding placeholders)
-    const realSecrets = this.injectedSecrets.filter(
-      (s) => !this.placeholders.has(s)
-    );
-    const l2 = maskKnownSecrets(result, realSecrets);
-    result = l2.body;
-    anyRedacted = anyRedacted || l2.redacted;
-
-    // Layer 3: Service-specific patterns
+    const layers: string[] = [];
+    const heuristicKeys: string[] = [];
     const service = this.config.services[serviceName];
-    if (service?.response_masking?.patterns) {
-      const l3 = maskPatterns(result, service.response_masking.patterns);
-      result = l3.body;
-      anyRedacted = anyRedacted || l3.redacted;
+    const heuristicConfig = service?.response_masking?.heuristic;
+    const heuristicEnabled = heuristicConfig?.enabled !== false;
+
+    // Attempt JSON parse
+    let parsed: any;
+    let isJson = false;
+    try {
+      parsed = JSON.parse(body);
+      if (typeof parsed === 'object' && parsed !== null) {
+        isJson = true;
+      }
+    } catch {
+      // Not JSON
     }
 
-    // Layer 4: JSON path redaction
-    if (service?.response_masking?.json_paths) {
-      const l4 = maskJsonPaths(result, service.response_masking.json_paths);
-      result = l4.body;
-      anyRedacted = anyRedacted || l4.redacted;
+    let result: string;
+
+    if (isJson) {
+      // JSON path: deep walk for L2 (structural) + L3 (heuristic)
+      const walkResult = this.walkAndMask(
+        parsed, heuristicEnabled, heuristicConfig
+      );
+      if (walkResult.redacted) {
+        anyRedacted = true;
+        if (walkResult.l2Hit) layers.push('known_secret');
+        if (walkResult.l3Hit) layers.push('heuristic');
+        heuristicKeys.push(...walkResult.heuristicKeys);
+      }
+
+      // L4: user json_paths (operates on already-parsed object)
+      if (service?.response_masking?.json_paths) {
+        const l4 = redactJsonPaths(parsed, service.response_masking.json_paths);
+        if (l4) {
+          anyRedacted = true;
+          if (!layers.includes('json_path')) layers.push('json_path');
+        }
+      }
+
+      result = JSON.stringify(parsed);
+
+      // L4: user patterns (raw text on serialized result)
+      if (service?.response_masking?.patterns) {
+        const l4p = this.applyPatterns(result, service.response_masking.patterns);
+        result = l4p.body;
+        if (l4p.redacted) {
+          anyRedacted = true;
+          if (!layers.includes('pattern')) layers.push('pattern');
+        }
+      }
+    } else {
+      // Non-JSON: L2 raw text substring scan
+      const l2 = this.registry.replaceAllSubstrings(body, REDACTION_MARKER);
+      result = l2.result;
+      if (l2.replaced) {
+        anyRedacted = true;
+        layers.push('known_secret');
+      }
+
+      // L4: user patterns (raw text)
+      if (service?.response_masking?.patterns) {
+        const l4p = this.applyPatterns(result, service.response_masking.patterns);
+        result = l4p.body;
+        if (l4p.redacted) {
+          anyRedacted = true;
+          if (!layers.includes('pattern')) layers.push('pattern');
+        }
+      }
+      // L3 heuristic is JSON-only. Non-JSON responses rely on L2.
+      // L4 json_paths require JSON — skipped for non-JSON.
     }
 
-    return { body: result, redacted: anyRedacted };
+    return { body: result, redacted: anyRedacted, layers, heuristicKeys };
+  }
+
+  private walkAndMask(
+    obj: any,
+    heuristicEnabled: boolean,
+    heuristicConfig?: HeuristicConfig
+  ): { redacted: boolean; l2Hit: boolean; l3Hit: boolean; heuristicKeys: string[] } {
+    let l2Hit = false;
+    let l3Hit = false;
+    const heuristicKeys: string[] = [];
+
+    const walk = (node: any, parentKey?: string): void => {
+      if (node === null || node === undefined) return;
+      if (Array.isArray(node)) {
+        for (let i = 0; i < node.length; i++) {
+          if (typeof node[i] === 'string') {
+            const r = this.maskStringValue(
+              node[i], undefined, heuristicEnabled, heuristicConfig
+            );
+            if (r.replaced) {
+              node[i] = r.value;
+              if (r.l2) l2Hit = true;
+              if (r.l3) l3Hit = true;
+              if (r.l3Key) heuristicKeys.push(r.l3Key);
+            }
+          } else if (typeof node[i] === 'object') {
+            walk(node[i]);
+          }
+        }
+      } else if (typeof node === 'object') {
+        for (const key of Object.keys(node)) {
+          if (typeof node[key] === 'string') {
+            const r = this.maskStringValue(
+              node[key], key, heuristicEnabled, heuristicConfig
+            );
+            if (r.replaced) {
+              node[key] = r.value;
+              if (r.l2) l2Hit = true;
+              if (r.l3) l3Hit = true;
+              if (r.l3Key) heuristicKeys.push(r.l3Key);
+            }
+          } else if (typeof node[key] === 'object' && node[key] !== null) {
+            walk(node[key], key);
+          }
+        }
+      }
+    };
+
+    walk(obj);
+    return { redacted: l2Hit || l3Hit, l2Hit, l3Hit, heuristicKeys };
+  }
+
+  private maskStringValue(
+    value: string,
+    key: string | undefined,
+    heuristicEnabled: boolean,
+    heuristicConfig?: HeuristicConfig
+  ): { value: string; replaced: boolean; l2: boolean; l3: boolean; l3Key?: string } {
+    // L2: Exact match
+    if (this.registry.hasExact(value)) {
+      return { value: REDACTION_MARKER, replaced: true, l2: true, l3: false };
+    }
+
+    // L2: Substring match
+    const sub = this.registry.replaceAllSubstrings(value, REDACTION_MARKER);
+    if (sub.replaced) {
+      return { value: sub.result, replaced: true, l2: true, l3: false };
+    }
+
+    // L3: Heuristic (only if we have a key name and L2 didn't touch the value)
+    if (heuristicEnabled && key !== undefined) {
+      if (shouldRedactHeuristic(key, value, {
+        minLength: heuristicConfig?.min_length,
+        minEntropy: heuristicConfig?.min_entropy,
+        additionalKeyNames: heuristicConfig?.additional_key_names,
+      })) {
+        return {
+          value: REDACTION_MARKER,
+          replaced: true,
+          l2: false,
+          l3: true,
+          l3Key: key
+        };
+      }
+    }
+
+    return { value, replaced: false, l2: false, l3: false };
+  }
+
+  private applyPatterns(
+    body: string,
+    patterns: string[]
+  ): { body: string; redacted: boolean } {
+    let masked = body;
+    let redacted = false;
+    for (const pattern of patterns) {
+      const before = masked;
+      masked = masked.replace(new RegExp(pattern, 'g'), REDACTION_MARKER);
+      if (masked !== before) redacted = true;
+    }
+    return { body: masked, redacted };
   }
 
   /** Check if response is binary. Uses Content-Type then falls back to byte sniffing. */
@@ -183,8 +274,8 @@ export class ResponseMasker {
     return false;
   }
 
-  getInjectedSecrets(): string[] {
-    return this.injectedSecrets;
+  getRegistry(): SecretRegistry {
+    return this.registry;
   }
 }
 
@@ -196,13 +287,13 @@ export class StreamingMasker {
   private masker: ResponseMasker;
   private serviceName: string;
   private hasJsonPaths: boolean;
-  private jsonPathAccumulator: string = '';
-  private jsonPathAccumulatorOverflow = false;
+  private hasHeuristic: boolean;
+  private accumulator: string = '';
+  private accumulatorOverflow = false;
   private logger?: AuditLogger;
 
   constructor(
     masker: ResponseMasker,
-    secrets: string[],
     serviceName: string,
     config: ParsedConfig,
     logger?: AuditLogger
@@ -213,23 +304,20 @@ export class StreamingMasker {
 
     const service = config.services[serviceName];
     this.hasJsonPaths = !!(service?.response_masking?.json_paths?.length);
+    this.hasHeuristic = service?.response_masking?.heuristic?.enabled !== false;
 
     const windowCap =
       service?.response_masking?.streaming_window_cap ??
       DEFAULT_STREAMING_WINDOW_CAP;
 
-    // Window = max of (longest secret across encodings, longest regex match estimate)
+    // Window = max variant length across all registry entries
     this.windowSize = 0;
-
-    for (const secret of secrets) {
-      this.windowSize = Math.max(
-        this.windowSize,
-        secret.length,
-        Buffer.from(secret).toString('base64').length,
-        encodeURIComponent(secret).length
-      );
+    const registry = masker.getRegistry();
+    for (const variant of registry.getAllVariants()) {
+      this.windowSize = Math.max(this.windowSize, variant.length);
     }
 
+    // Plus regex pattern estimates
     if (service?.response_masking?.patterns) {
       for (const pattern of service.response_masking.patterns) {
         this.windowSize = Math.max(
@@ -245,26 +333,27 @@ export class StreamingMasker {
   processChunk(chunk: string): { output: string; redacted: boolean } {
     const combined = this.buffer + chunk;
 
-    // Accumulate for deferred JSON path redaction (with OOM protection)
-    if (this.hasJsonPaths && !this.jsonPathAccumulatorOverflow) {
+    // Accumulate for deferred L3 heuristic + L4 json_paths (with OOM protection)
+    const needsAccumulation = this.hasJsonPaths || this.hasHeuristic;
+    if (needsAccumulation && !this.accumulatorOverflow) {
       if (
-        this.jsonPathAccumulator.length + chunk.length >
+        this.accumulator.length + chunk.length >
         MAX_ACCUMULATOR_SIZE
       ) {
-        this.jsonPathAccumulatorOverflow = true;
-        this.jsonPathAccumulator = ''; // Free memory immediately
+        this.accumulatorOverflow = true;
+        this.accumulator = ''; // Free memory immediately
         this.logger?.warn(
           'response.accumulator_overflow',
           {
             service: this.serviceName,
             error:
               `Response exceeded ${MAX_ACCUMULATOR_SIZE} bytes. ` +
-              `Layer 4 (json_paths) masking will be skipped. ` +
-              `Layers 2 and 3 still apply.`
+              `L3 (heuristic) and L4 (json_paths) masking will be skipped. ` +
+              `L2 (known secrets) and L4 (patterns) still apply.`
           }
         );
       } else {
-        this.jsonPathAccumulator += chunk;
+        this.accumulator += chunk;
       }
     }
 
@@ -277,41 +366,35 @@ export class StreamingMasker {
     const safeRegion = combined.substring(0, safeLength);
     this.buffer = combined.substring(safeLength);
 
-    // Apply L2 and L3 only during streaming; L4 is deferred to flush
+    // During streaming: chunks are partial strings, not valid JSON.
+    // maskBody() will fall through to the non-JSON branch, applying
+    // L2 raw substring scan + L4 patterns. L3 heuristic is deferred to flush.
     const { body, redacted } = this.masker.maskBody(safeRegion, this.serviceName);
     return { output: body, redacted };
   }
 
   flush(): { output: string; redacted: boolean } {
-    let result = this.buffer;
+    const remaining = this.buffer;
     this.buffer = '';
 
-    // Apply L2 and L3
-    let { body: masked, redacted } = this.masker.maskBody(
-      result,
-      this.serviceName
-    );
-
-    // Apply deferred L4 (JSON path) on full accumulated response
+    // If we accumulated the full response, run the full pipeline on it
+    // (L2 structural JSON scan + L3 heuristic + L4 json_paths + L4 patterns)
     if (
-      this.hasJsonPaths &&
-      !this.jsonPathAccumulatorOverflow &&
-      this.jsonPathAccumulator
+      (this.hasJsonPaths || this.hasHeuristic) &&
+      !this.accumulatorOverflow &&
+      this.accumulator
     ) {
-      const service = this.masker['config'].services[this.serviceName];
-      if (service?.response_masking?.json_paths) {
-        const l4 = maskJsonPaths(
-          this.jsonPathAccumulator,
-          service.response_masking.json_paths
-        );
-        if (l4.redacted) {
-          masked = l4.body;
-          redacted = true;
-        }
-      }
-      this.jsonPathAccumulator = '';
+      const full = this.masker.maskBody(this.accumulator, this.serviceName);
+      this.accumulator = '';
+      return { output: full.body, redacted: full.redacted };
     }
 
+    // Fallback: run pipeline on just the remaining buffer
+    const { body: masked, redacted } = this.masker.maskBody(
+      remaining,
+      this.serviceName
+    );
+    this.accumulator = '';
     return { output: masked, redacted };
   }
 }

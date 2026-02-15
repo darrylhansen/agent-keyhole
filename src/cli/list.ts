@@ -1,7 +1,12 @@
 import fs from 'fs';
-import path from 'path';
 import { loadConfig } from '../config/loader.js';
-import { createStore } from '../store/vault.js';
+import { createStore, VaultStore } from '../store/vault.js';
+import {
+  getConfigPath,
+  getVaultPath,
+  promptSecret,
+  NO_STORE_GUIDANCE
+} from './shared.js';
 
 export async function listCommand(args: string[]): Promise<void> {
   const configPath = getConfigPath(args);
@@ -11,13 +16,33 @@ export async function listCommand(args: string[]): Promise<void> {
   }
 
   const config = await loadConfig(configPath);
+  const vaultPath = getVaultPath(args);
 
   let store;
   try {
-    store = await createStore();
+    store = await createStore({ vaultPath });
   } catch {
-    console.error('Warning: Could not access secret store. Showing config only.\n');
+    console.error(NO_STORE_GUIDANCE);
+    console.error('');
     store = null;
+  }
+
+  // If vault store, attempt unlock before checking secrets
+  let vaultLocked = false;
+  if (store instanceof VaultStore) {
+    const passphrase = await promptSecret('Enter vault passphrase: ');
+    if (!passphrase) {
+      vaultLocked = true;
+      console.error('Skipping secret status (vault locked).\n');
+    } else {
+      try {
+        await store.unlock(passphrase);
+      } catch (err: any) {
+        vaultLocked = true;
+        console.error(`Could not unlock vault: ${err.message}`);
+        console.error('Showing config only (vault locked).\n');
+      }
+    }
   }
 
   console.error('Services configured in keyhole.yaml:\n');
@@ -34,18 +59,22 @@ export async function listCommand(args: string[]): Promise<void> {
 
     const authType = service.auth.type.padEnd(8);
 
-    let status = '? unknown';
-    if (store) {
+    let status: string;
+    if (vaultLocked) {
+      status = '? vault locked';
+    } else if (!store) {
+      status = '? no store';
+    } else {
       try {
         const has = await store.has(service.auth.secret_ref);
         if (has) {
-          status = '✔ stored';
+          status = '+ stored';
           storedCount++;
         } else {
-          status = '✗ not found';
+          status = '- not found';
         }
       } catch {
-        status = '✗ not found';
+        status = '- not found';
       }
     }
 
@@ -56,43 +85,23 @@ export async function listCommand(args: string[]): Promise<void> {
 
   console.error('');
 
-  if (store) {
+  if (vaultLocked) {
+    console.error(
+      'Unlock the vault to see secret status: re-run "npx keyhole list"'
+    );
+  } else if (store) {
     console.error(
       `${storedCount} of ${services.length} services have secrets configured.`
     );
 
     if (storedCount < services.length) {
-      const missing = services.filter(
-        async ([_, s]) => {
-          try {
-            return !(await store!.has(s.auth.secret_ref));
-          } catch {
-            return true;
-          }
-        }
-      );
-      // Show first missing service as hint
-      for (const [name] of services) {
-        try {
-          const service = config.services[name];
-          const has = store ? await store.has(service.auth.secret_ref) : false;
-          if (!has) {
-            console.error(`Run "npx keyhole add ${name}" to add the missing secret.`);
-            break;
-          }
-        } catch {
+      for (const [name, service] of services) {
+        const has = await store.has(service.auth.secret_ref).catch(() => false);
+        if (!has) {
           console.error(`Run "npx keyhole add ${name}" to add the missing secret.`);
           break;
         }
       }
     }
   }
-}
-
-function getConfigPath(args: string[]): string {
-  const configIdx = args.indexOf('--config');
-  if (configIdx !== -1 && args[configIdx + 1]) {
-    return path.resolve(args[configIdx + 1]);
-  }
-  return path.resolve('keyhole.yaml');
 }

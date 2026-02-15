@@ -1,10 +1,13 @@
 import fs from 'fs';
-import path from 'path';
-import readline from 'readline';
 import { loadConfig } from '../config/loader.js';
 import { VaultStore } from '../store/vault.js';
-
-const MIN_PASSPHRASE_LENGTH = 12;
+import {
+  promptSecret,
+  promptConfirm,
+  getConfigPath,
+  getVaultPath,
+  createVaultInteractive
+} from './shared.js';
 
 export async function vaultCommand(args: string[]): Promise<void> {
   const subcommand = args[0];
@@ -36,25 +39,13 @@ async function vaultCreate(args: string[]): Promise<void> {
     process.exit(1);
   }
 
-  const passphrase = await promptSecret('Enter master passphrase: ');
-  if (passphrase.length < MIN_PASSPHRASE_LENGTH) {
-    console.error(
-      `Error: Passphrase must be at least ${MIN_PASSPHRASE_LENGTH} characters`
-    );
+  try {
+    await createVaultInteractive(vaultPath);
+    console.error('  To add secrets: npx keyhole vault add <service-name>');
+  } catch (err: any) {
+    console.error(`Error: ${err.message}`);
     process.exit(1);
   }
-
-  const confirm = await promptSecret('Confirm master passphrase: ');
-  if (passphrase !== confirm) {
-    console.error('Error: Passphrases do not match');
-    process.exit(1);
-  }
-
-  const vault = new VaultStore(vaultPath);
-  await vault.create(passphrase);
-
-  console.error(`\n✔ Vault created at ${vaultPath} (permissions: 0600)`);
-  console.error('  To add secrets: npx keyhole vault add <service-name>');
 }
 
 async function vaultAdd(args: string[]): Promise<void> {
@@ -88,7 +79,7 @@ async function vaultAdd(args: string[]): Promise<void> {
 
   try {
     await vault.unlock(passphrase);
-    console.error('✔ Vault unlocked\n');
+    console.error('Vault unlocked\n');
   } catch (err: any) {
     console.error(`Error: ${err.message}`);
     process.exit(1);
@@ -105,8 +96,8 @@ async function vaultAdd(args: string[]): Promise<void> {
   }
 
   await vault.set(secretRef, value, passphrase);
-  console.error(`\n✔ Secret "${secretRef}" stored in vault`);
-  console.error('✔ Vault re-encrypted and saved');
+  console.error(`\nSecret "${secretRef}" stored in vault`);
+  console.error('Vault re-encrypted and saved');
 }
 
 async function vaultRemove(args: string[]): Promise<void> {
@@ -150,7 +141,7 @@ async function vaultRemove(args: string[]): Promise<void> {
   }
 
   await vault.delete(secretRef, passphrase);
-  console.error(`\n✔ Removed "${secretRef}" from vault`);
+  console.error(`\nRemoved "${secretRef}" from vault`);
 }
 
 async function vaultList(args: string[]): Promise<void> {
@@ -182,9 +173,6 @@ async function vaultList(args: string[]): Promise<void> {
   if (fs.existsSync(configPath)) {
     try {
       const config = await loadConfig(configPath);
-      const configRefs = new Set(
-        Object.values(config.services).map((s) => s.auth.secret_ref)
-      );
       const vaultRefs = new Set(secrets);
 
       for (const [name, service] of Object.entries(config.services)) {
@@ -198,52 +186,4 @@ async function vaultList(args: string[]): Promise<void> {
       // Config not available, skip
     }
   }
-}
-
-async function promptSecret(prompt: string): Promise<string> {
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stderr,
-    terminal: true
-  });
-
-  return new Promise((resolve) => {
-    (rl as any).output?.write(prompt);
-    (rl as any)._writeToOutput = function () {};
-    rl.question('', (answer) => {
-      (rl as any).output?.write('\n');
-      rl.close();
-      resolve(answer);
-    });
-  });
-}
-
-async function promptConfirm(prompt: string): Promise<boolean> {
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stderr
-  });
-
-  return new Promise((resolve) => {
-    rl.question(prompt, (answer) => {
-      rl.close();
-      resolve(answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes');
-    });
-  });
-}
-
-function getVaultPath(args: string[]): string {
-  const vaultIdx = args.indexOf('--vault');
-  if (vaultIdx !== -1 && args[vaultIdx + 1]) {
-    return path.resolve(args[vaultIdx + 1]);
-  }
-  return path.resolve('.keyhole.vault');
-}
-
-function getConfigPath(args: string[]): string {
-  const configIdx = args.indexOf('--config');
-  if (configIdx !== -1 && args[configIdx + 1]) {
-    return path.resolve(args[configIdx + 1]);
-  }
-  return path.resolve('keyhole.yaml');
 }

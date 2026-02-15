@@ -1,8 +1,13 @@
 import fs from 'fs';
-import path from 'path';
-import readline from 'readline';
 import { loadConfig } from '../config/loader.js';
-import { KeychainStore } from '../store/keychain.js';
+import { createStore, VaultStore } from '../store/vault.js';
+import {
+  promptSecret,
+  promptConfirm,
+  getConfigPath,
+  getVaultPath,
+  NO_STORE_GUIDANCE
+} from './shared.js';
 
 export async function removeCommand(args: string[]): Promise<void> {
   const serviceName = args.find((a) => !a.startsWith('-'));
@@ -25,9 +30,30 @@ export async function removeCommand(args: string[]): Promise<void> {
   }
 
   const secretRef = service.auth.secret_ref;
+  const vaultPath = getVaultPath(args);
 
+  let store;
+  try {
+    store = await createStore({ vaultPath });
+  } catch {
+    console.error(NO_STORE_GUIDANCE);
+    process.exit(1);
+  }
+
+  let passphrase: string | undefined;
+  if (store instanceof VaultStore) {
+    passphrase = await promptSecret('Enter vault passphrase: ');
+    try {
+      await store.unlock(passphrase);
+    } catch (err: any) {
+      console.error(`Error: ${err.message}`);
+      process.exit(1);
+    }
+  }
+
+  const storeName = store instanceof VaultStore ? 'vault' : 'OS keychain';
   const confirmed = await promptConfirm(
-    `Remove "${secretRef}" from OS keychain? (y/N): `
+    `Remove "${secretRef}" from ${storeName}? (y/N): `
   );
 
   if (!confirmed) {
@@ -35,34 +61,11 @@ export async function removeCommand(args: string[]): Promise<void> {
     return;
   }
 
-  const store = new KeychainStore();
   try {
-    await store.delete(secretRef);
-    console.error(`✔ Removed "${secretRef}" from OS keychain`);
+    await store.delete(secretRef, passphrase);
+    console.error(`Removed "${secretRef}" from ${storeName}`);
   } catch (err: any) {
     console.error(`Error: ${err.message}`);
     process.exit(1);
   }
-}
-
-async function promptConfirm(prompt: string): Promise<boolean> {
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stderr
-  });
-
-  return new Promise((resolve) => {
-    rl.question(prompt, (answer) => {
-      rl.close();
-      resolve(answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes');
-    });
-  });
-}
-
-function getConfigPath(args: string[]): string {
-  const configIdx = args.indexOf('--config');
-  if (configIdx !== -1 && args[configIdx + 1]) {
-    return path.resolve(args[configIdx + 1]);
-  }
-  return path.resolve('keyhole.yaml');
 }
