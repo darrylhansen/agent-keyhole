@@ -35,11 +35,20 @@ export class IPCClient {
         this.reconnectAttempts = 0;
         resolve();
       });
-      this.conn.on('error', (err) => {
-        if (!this.reconnecting) reject(err);
+      // Capture the socket so all handlers only fire for the current connection.
+      // Without this, updateConnection() creates a race: the old socket's async
+      // events fire after this.conn is reassigned to the new socket, causing
+      // handlers to act on the wrong connection context.
+      const socket = this.conn;
+      socket.on('close', () => {
+        if (this.conn === socket) this.handleDisconnect();
       });
-      this.conn.on('close', () => this.handleDisconnect());
-      this.conn.on('data', (data: Buffer) => this.onData(data));
+      socket.on('error', (err) => {
+        if (this.conn === socket && !this.reconnecting) reject(err);
+      });
+      socket.on('data', (data: Buffer) => {
+        if (this.conn === socket) this.onData(data);
+      });
     });
   }
 

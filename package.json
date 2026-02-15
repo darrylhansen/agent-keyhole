@@ -19,7 +19,10 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
-    "test": "node --test",
+    "pretest": "npm run build",
+    "test": "tsx --test 'test/**/*.test.ts'",
+    "test:unit": "tsx --test 'test/unit/*.test.ts'",
+    "test:integration": "tsx --test 'test/integration/*.test.ts'",
     "lint": "tsc --noEmit",
     "prepublishOnly": "npm run build"
   },
@@ -29,6 +32,7 @@
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^20.0.0",
+    "tsx": "^4.7.0",
     "typescript": "^5.5.0"
   },
   "engines": {
