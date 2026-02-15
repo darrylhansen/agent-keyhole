@@ -239,7 +239,7 @@ describe('migrate-detect', () => {
 
     it('unmatched secrets get generated secret_ref from key name', () => {
       const entries = [
-        makeEntry('STRIPE_SECRET_KEY', 'rk_test_FAKEFAKEFAKEFAKE'),
+        makeEntry('STRIPE_SECRET_KEY', 'sk_live_FAKEFAKEFAKEFAKE'),
       ];
       const results = detectSecrets(entries, WITH_SDK_ENV_CONFIG);
       const secret = results.find((r) => r.isSecret);
