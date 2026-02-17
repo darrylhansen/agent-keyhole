@@ -159,6 +159,18 @@ describe('migrate-detect', () => {
       assert.equal(isSecretValue('KEYHOLE_MANAGED'), false);
     });
 
+    it('format-aware placeholders excluded (substring KEYHOLE_MANAGED)', () => {
+      assert.equal(isSecretValue('ghp_KEYHOLE_MANAGED_000000000000000000'), false);
+      assert.equal(isSecretValue('sk-proj-KEYHOLE_MANAGED_0000000000000000000'), false);
+      assert.equal(isSecretValue('database_KEYHOLE_MANAGED'), false);
+    });
+
+    it('env var references excluded (${VAR} placeholders)', () => {
+      assert.equal(isSecretValue('${OPENAI_API_KEY}'), false);
+      assert.equal(isSecretValue('${ANTHROPIC_API_KEY}'), false);
+      assert.equal(isSecretValue('${MY_LONG_SECRET_NAME}'), false);
+    });
+
     it('URLs without credentials not secret', () => {
       assert.equal(isSecretValue('https://api.example.com/v1'), false);
     });

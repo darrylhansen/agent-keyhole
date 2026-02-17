@@ -71,18 +71,13 @@ Patches `http.request`, `https.request`, and `globalThis.fetch`. Existing code a
 ```typescript
 const kh = await createKeyhole({ autoPatch: true });
 
-// Uses process.env.GITHUB_TOKEN (set to placeholder by safe-env)
-// but the real token is injected by the sidecar transparently.
+// If you have a .env (post-migration): SDKs read placeholders automatically.
+// If not: generate placeholder env vars from sdk_env mappings in keyhole.yaml:
+// const env = kh.getSafeEnv();
+// Object.assign(process.env, env);
+
 const res = await fetch('https://api.github.com/user/repos');
-```
-
-Set placeholder environment variables for SDK compatibility:
-
-```typescript
-const env = kh.getSafeEnv();
-Object.assign(process.env, env);
-// process.env.GITHUB_TOKEN === "KEYHOLE_MANAGED"
-// process.env.OPENAI_API_KEY === "sk-keyhole-0000..."
+// Real token injected by the sidecar — agent process never sees it.
 ```
 
 ## VPS / Headless Environments
@@ -122,11 +117,35 @@ services:
     auth:
       type: bearer             # bearer | basic | query_param | custom_header
       secret_ref: github-token
-    placeholder: "KEYHOLE_MANAGED"
-    sdk_env:
-      GITHUB_TOKEN: "{{placeholder}}"
     headers:
       Accept: application/vnd.github+json
+```
+
+### After migration (most users)
+
+If you ran `npx keyhole migrate`, your `.env` already has placeholder values.
+SDKs read these automatically — just configure service domains and auth in `keyhole.yaml`.
+No `sdk_env` or `placeholder` fields needed.
+
+### Programmatic setup (no .env file)
+
+If you don't have a `.env` file, use `sdk_env` to generate placeholder env vars:
+
+```yaml
+    sdk_env:
+      GITHUB_TOKEN: "{{placeholder}}"
+```
+
+```typescript
+const kh = await createKeyhole({ autoPatch: true });
+const env = kh.getSafeEnv();        // reads sdk_env mappings from yaml
+Object.assign(process.env, env);    // SDKs see placeholder values
+```
+
+If an SDK validates key format (e.g., OpenAI checks for `sk-` prefix), set a format-aware placeholder:
+
+```yaml
+    placeholder: "sk-keyhole-000000000000000000000000000000000000000000000000"
 ```
 
 Response masking is automatic. For edge cases, add optional overrides:

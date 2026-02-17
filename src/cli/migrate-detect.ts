@@ -51,7 +51,10 @@ export function isSecretValue(value: string): boolean {
   if (/^\d+(\.\d+)?$/.test(value)) return false;
 
   // Skip placeholders
-  if (value === 'KEYHOLE_MANAGED' || value === '') return false;
+  if (value.includes('KEYHOLE_MANAGED') || value === '') return false;
+
+  // Skip env var references (e.g. ${OPENAI_API_KEY} in openclaw.json)
+  if (/^\$\{.+\}$/.test(value)) return false;
 
   // URLs are not secrets unless they contain embedded credentials
   if (/^https?:\/\//i.test(value)) {

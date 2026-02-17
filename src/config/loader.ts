@@ -90,7 +90,16 @@ export async function loadConfig(configPath: string): Promise<ParsedConfig> {
 }
 
 function validateConfig(config: KeyholeConfig): void {
-  if (!config.services || typeof config.services !== 'object') {
+  // 'services' key missing entirely — invalid config
+  if (!('services' in config)) {
+    throw new Error('keyhole.yaml must have a "services" section');
+  }
+  // services: with all examples commented out parses as null — valid after init
+  if (config.services === null || config.services === undefined) {
+    config.services = {};
+    return;
+  }
+  if (typeof config.services !== 'object') {
     throw new Error('keyhole.yaml must have a "services" section');
   }
 

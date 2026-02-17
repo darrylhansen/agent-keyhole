@@ -22,14 +22,41 @@ export interface SourceFile {
   jsonRoot?: string;
 }
 
-export const SUPPORTED_FILES: SourceFile[] = [
-  { filename: '.env', format: 'env' },
-  { filename: '.env.local', format: 'env' },
-  { filename: '.env.development', format: 'env' },
-  { filename: '.dev.vars', format: 'env' },
-  { filename: 'localsettings.json', format: 'json', jsonRoot: 'Values' },
-  { filename: '.claude/settings.json', format: 'json' },
+export const SECRET_SOURCE_FILES = [
+  '.env',
+  '.env.local',
+  '.env.development',
+  '.env.production',
+  '.env.staging',
+  '.env.test',
+  '.dev.vars',
+  'localsettings.json',
+  '.claude/settings.json',
+  'open-claw.json',
+  'secrets.json',
+  'credentials.json',
+  '.openclaw/.env',
+  '.openclaw/openclaw.json',
 ];
+
+/** Format and options for each discoverable file */
+const SOURCE_FILE_OPTIONS: Record<string, { format: 'env' | 'json'; jsonRoot?: string }> = {
+  'localsettings.json': { format: 'json', jsonRoot: 'Values' },
+  '.claude/settings.json': { format: 'json' },
+  'open-claw.json': { format: 'json' },
+  'secrets.json': { format: 'json' },
+  'credentials.json': { format: 'json' },
+  '.openclaw/openclaw.json': { format: 'json' },
+};
+
+export const SUPPORTED_FILES: SourceFile[] = SECRET_SOURCE_FILES.map((filename) => {
+  const opts = SOURCE_FILE_OPTIONS[filename];
+  return {
+    filename,
+    format: opts?.format ?? 'env',
+    jsonRoot: opts?.jsonRoot,
+  };
+});
 
 /**
  * Discover which supported source files exist in the given directory.

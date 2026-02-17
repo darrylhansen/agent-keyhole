@@ -1,10 +1,12 @@
 import { initCommand } from './init.js';
 import { addCommand } from './add.js';
 import { removeCommand } from './remove.js';
+import { getCommand } from './get.js';
 import { listCommand } from './list.js';
 import { testCommand } from './test.js';
 import { vaultCommand } from './vault.js';
 import { migrateCommand } from './migrate.js';
+import { safeRepo } from './safe-repo.js';
 
 const VERSION = '1.0.0';
 
@@ -21,6 +23,9 @@ export async function runCLI(args: string[]): Promise<void> {
     case 'remove':
       await removeCommand(args.slice(1));
       break;
+    case 'get':
+      await getCommand(args.slice(1));
+      break;
     case 'list':
       await listCommand(args.slice(1));
       break;
@@ -32,6 +37,9 @@ export async function runCLI(args: string[]): Promise<void> {
       break;
     case 'migrate':
       await migrateCommand(args.slice(1));
+      break;
+    case 'safe-repo':
+      safeRepo();
       break;
     case 'version':
     case '--version':
@@ -61,6 +69,7 @@ Commands:
   init                    Create a keyhole.yaml config file
   add <service>           Store a secret in the OS keychain
   remove <service>        Remove a secret from the OS keychain
+  get <secret-ref>        Retrieve and print a stored secret value
   list                    List configured services and secret status
   test [service]          Test connectivity through the sidecar
   vault create            Create an encrypted vault file
@@ -68,6 +77,7 @@ Commands:
   vault remove <service>  Remove a secret from the vault
   vault list              List secrets in the vault (names only)
   migrate                 Import secrets from .env files into Keyhole store
+  safe-repo               Ensure .gitignore covers secret files
   help                    Show this help
   version                 Show version
 

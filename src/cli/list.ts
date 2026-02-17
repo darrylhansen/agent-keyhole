@@ -83,6 +83,37 @@ export async function listCommand(args: string[]): Promise<void> {
     );
   }
 
+  // Show orphaned secrets (in store but not matching any service)
+  let orphanedCount = 0;
+  if (store && !vaultLocked) {
+    try {
+      const allRefs = await store.list();
+      const configuredRefs = new Set(
+        Object.values(config.services).map((s) => s.auth.secret_ref)
+      );
+      const orphaned = allRefs.filter((ref) => !configuredRefs.has(ref));
+      orphanedCount = orphaned.length;
+
+      if (orphaned.length > 0) {
+        console.error('\nAdditional secrets in store (no matching service):');
+        for (const ref of orphaned) {
+          console.error(`  ${ref}`);
+        }
+        console.error(
+          '\nThese secrets were imported but have no service in keyhole.yaml.'
+        );
+        console.error(
+          'To view a value: npx keyhole get <secret-ref>'
+        );
+        console.error(
+          'Add a service configuration to use them, or remove with "npx keyhole vault remove".'
+        );
+      }
+    } catch {
+      // store.list() may fail — ignore
+    }
+  }
+
   console.error('');
 
   if (vaultLocked) {
@@ -93,6 +124,12 @@ export async function listCommand(args: string[]): Promise<void> {
     console.error(
       `${storedCount} of ${services.length} services have secrets configured.`
     );
+
+    if (orphanedCount > 0) {
+      console.error(
+        `${orphanedCount} additional secret(s) in store without a matching service.`
+      );
+    }
 
     if (storedCount < services.length) {
       for (const [name, service] of services) {

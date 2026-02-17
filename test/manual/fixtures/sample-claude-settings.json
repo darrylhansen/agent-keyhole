@@ -1,0 +1,5 @@
+{
+  "api_key": "sk-ant-key01-abcdef1234567890abcdef1234567890abcdef12345678",
+  "model": "claude-sonnet-4-20250514",
+  "max_tokens": 4096
+}

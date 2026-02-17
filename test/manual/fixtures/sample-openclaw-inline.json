@@ -1,0 +1,16 @@
+{
+  "providers": {
+    "openai": {
+      "apiKey": "sk-proj-ABCdef123456GHIjkl789012MNOpqr345678",
+      "defaultModel": "gpt-4o"
+    },
+    "anthropic": {
+      "apiKey": "sk-ant-key01-abcdef1234567890abcdef1234567890abcdef12345678",
+      "defaultModel": "claude-sonnet-4-20250514"
+    }
+  },
+  "gateway": {
+    "port": 3100,
+    "logLevel": "info"
+  }
+}

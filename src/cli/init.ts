@@ -1,35 +1,40 @@
 import fs from 'fs';
 import os from 'os';
 import { promptConfirm, getConfigPath } from './shared.js';
+import { safeRepo } from './safe-repo.js';
 
 const TEMPLATE = `# keyhole.yaml – Agent-Keyhole configuration
 # Documentation: https://github.com/darrylhansen/agent-keyhole
 
 services:
-  github:
-    domains:
-      - api.github.com
-    auth:
-      type: bearer
-      secret_ref: github-token
-    headers:
-      Accept: application/vnd.github+json
-      X-GitHub-Api-Version: "2022-11-28"
-    # Response masking is automatic — no configuration needed.
-    # Keyhole detects and redacts known secrets and credential-like values.
+  # ─── How SDKs get credentials ───
+  #
+  # If you have a .env file (e.g. after running "npx keyhole migrate"):
+  #   SDKs read placeholder values from .env automatically.
+  #   No additional configuration needed — Keyhole intercepts by domain.
+  #
+  # If you do NOT have a .env file (programmatic setup):
+  #   Add sdk_env to map env var names to placeholders:
+  #
+  #   sdk_env:
+  #     GITHUB_TOKEN: "KEYHOLE_MANAGED"
+  #
+  #   Then in your code: Object.assign(process.env, kh.getSafeEnv())
+  #
+  # If an SDK validates key format (e.g. OpenAI checks for "sk-" prefix):
+  #   Set a format-aware placeholder:
+  #
+  #   placeholder: "sk-keyhole-0000000000000000000000000000000000000000"
 
-    # Optional: Only needed with autoPatch mode so SDKs see a fake key in process.env
-    # sdk_env:
-    #   GITHUB_TOKEN: "{{placeholder}}"
-    # Optional: Fake key format for SDKs that validate key format (default: KEYHOLE_MANAGED)
-    # placeholder: "KEYHOLE_MANAGED"
-
-    # Optional: Manual response masking overrides (rarely needed)
-    # response_masking:
-    #   patterns:
-    #     - "ghp_[A-Za-z0-9_]{36}"
-    #   json_paths:
-    #     - "$.token"
+  # github:
+  #   domains:
+  #     - api.github.com
+  #   auth:
+  #     type: bearer
+  #     secret_ref: github-token
+  #   headers:
+  #     Accept: application/vnd.github+json
+  #     X-GitHub-Api-Version: "2022-11-28"
 
   # openai:
   #   domains:
@@ -37,8 +42,9 @@ services:
   #   auth:
   #     type: bearer
   #     secret_ref: openai-api-key
-  #   # OpenAI SDK validates key format, so placeholder must look like a real key
+  #   # OpenAI SDK validates key format — placeholder must start with "sk-"
   #   placeholder: "sk-keyhole-000000000000000000000000000000000000000000000000"
+  #   # Only needed if NOT using a .env file:
   #   sdk_env:
   #     OPENAI_API_KEY: "{{placeholder}}"
 
@@ -50,6 +56,7 @@ services:
   #     header_name: x-api-key
   #     secret_ref: anthropic-api-key
   #   placeholder: "sk-ant-keyhole-000000000000000000000000000000000000"
+  #   # Only needed if NOT using a .env file:
   #   sdk_env:
   #     ANTHROPIC_API_KEY: "{{placeholder}}"
 
@@ -85,9 +92,9 @@ export async function initCommand(args: string[]): Promise<void> {
   }
 
   fs.writeFileSync(configPath, TEMPLATE, 'utf-8');
-  console.error(`Created ${configPath} with example configuration`);
-  console.error('  Edit the file to add your services, then run:');
-  console.error('  npx keyhole add <service-name>');
+  console.error(`Created ${configPath}`);
+  console.error('  Next: uncomment a service example and run "npx keyhole add <service-name>"');
+  console.error('  Or run "npx keyhole migrate" to import secrets from .env files.');
 
   // Detect secret store environment and print guidance
   try {
@@ -100,4 +107,6 @@ export async function initCommand(args: string[]): Promise<void> {
     console.error('  No OS keychain detected. You\'ll need an encrypted vault:');
     console.error('  npx keyhole vault create');
   }
+
+  safeRepo({ silent: true });
 }

@@ -366,6 +366,14 @@ logging:
   level: info
 `;
 
+export const YAML_EMPTY_SERVICES = `
+services:
+  # All examples commented out — fresh init state
+  # github:
+  #   domains:
+  #     - api.github.com
+`;
+
 export const YAML_MISSING_DOMAINS = `
 services:
   github:

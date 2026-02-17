@@ -12,6 +12,7 @@ import { AuditLogger } from './audit-logger.js';
 import { sendBootAlert } from './alerting.js';
 import type { ParsedConfig } from '../config/schema.js';
 import type { BootstrapMessage, UnlockMessage } from './ipc-types.js';
+import { generatePlaceholder } from '../client/safe-env.js';
 
 type SidecarState = 'booting' | 'pending_unlock' | 'ready' | 'shutting_down';
 
@@ -189,8 +190,8 @@ function buildRegistry(
   secretsMap: Map<string, string>
 ): SecretRegistry {
   const placeholders = new Set(
-    Object.values(cfg.services).map(
-      (s) => s.placeholder || 'KEYHOLE_MANAGED'
+    Object.entries(cfg.services).map(
+      ([name, s]) => s.placeholder || generatePlaceholder(name)
     )
   );
   return new SecretRegistry(secretsMap, placeholders);

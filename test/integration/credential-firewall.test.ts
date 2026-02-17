@@ -60,7 +60,7 @@ describe('credential-firewall integration', () => {
     const env = generateSafeEnv(config);
 
     // Env vars should have placeholders, NOT real secrets
-    assert.equal(env.GITHUB_TOKEN, 'KEYHOLE_MANAGED');
+    assert.equal(env.GITHUB_TOKEN, 'github_KEYHOLE_MANAGED');
     assert.equal(env.OPENAI_API_KEY, 'CUSTOM_PLACEHOLDER');
     assert.ok(!Object.values(env).includes(TEST_SECRET));
     assert.ok(!Object.values(env).includes(OPENAI_SECRET));
@@ -144,7 +144,7 @@ describe('credential-firewall integration', () => {
     try {
       // Verify safe env doesn't have real secret
       const safeEnv = generateSafeEnv(config);
-      assert.equal(safeEnv.GITHUB_TOKEN, 'KEYHOLE_MANAGED');
+      assert.equal(safeEnv.GITHUB_TOKEN, 'github_KEYHOLE_MANAGED');
       assert.ok(!Object.values(safeEnv).includes(TEST_SECRET));
 
       // Make fetch call — sidecar should inject real secret

@@ -5,6 +5,7 @@ import { loadConfig } from '../../src/config/loader.js';
 import {
   VALID_YAML,
   YAML_MISSING_SERVICES,
+  YAML_EMPTY_SERVICES,
   YAML_MISSING_DOMAINS,
   YAML_MISSING_AUTH,
   YAML_INVALID_AUTH_TYPE,
@@ -121,6 +122,16 @@ describe('config-loader', () => {
     it('invalid heuristic config throws', async () => {
       mockYaml(YAML_INVALID_HEURISTIC_CONFIG);
       await assert.rejects(loadConfig('/fake/keyhole.yaml'), /min_length/i);
+    });
+  });
+
+  describe('empty services block', () => {
+    it('services: with all commented entries loads as empty config', async () => {
+      mockYaml(YAML_EMPTY_SERVICES);
+      const config = await loadConfig('/fake/keyhole.yaml');
+      assert.deepEqual(Object.keys(config.services), []);
+      assert.equal(config._domainToService.size, 0);
+      assert.deepEqual(config._secretRefs, []);
     });
   });
 

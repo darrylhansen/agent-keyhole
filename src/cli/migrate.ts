@@ -24,6 +24,7 @@ import {
   createVaultInteractive,
   NO_STORE_GUIDANCE,
 } from './shared.js';
+import { generatePlaceholder } from '../client/safe-env.js';
 
 export async function migrateCommand(args: string[]): Promise<void> {
   const dryRun = args.includes('--dry-run');
@@ -47,7 +48,7 @@ export async function migrateCommand(args: string[]): Promise<void> {
   const found = discoverFiles(cwd);
 
   if (found.length === 0) {
-    console.error('No supported secret files found (.env, .env.local, etc.)');
+    console.error('No supported secret files found (.env, .env.local, .openclaw/.env, etc.)');
     return;
   }
 
@@ -248,21 +249,40 @@ export async function migrateCommand(args: string[]): Promise<void> {
   // Step 9: Cleanup source files
   if (!noCleanup) {
     await cleanupFiles(cwd, found, secrets);
+    console.error(
+      '\nYour .env now contains format-aware placeholders.'
+    );
+    console.error(
+      'SDKs will read these automatically — no sdk_env configuration needed in keyhole.yaml.'
+    );
   }
 
-  // Step 10: Config suggestions for unmatched secrets
+  // Step 10: Scaffold unmatched services into keyhole.yaml
   const unmatched = toImport.filter((c) => !c.matchedService);
   if (unmatched.length > 0) {
-    console.error(
-      `\nNote: ${unmatched.length} imported secret(s) don't have matching services in keyhole.yaml:`
-    );
-    for (const c of unmatched) {
-      console.error(`  - ${c.secretRef}`);
+    const { scaffoldUnmatchedServices } = await import('./migrate-scaffold.js');
+    const { scaffolded, skipped } = scaffoldUnmatchedServices(configPath, unmatched);
+
+    if (scaffolded.length > 0) {
+      console.error(
+        `\nScaffolded ${scaffolded.length} service stub(s) in ${path.basename(configPath)}:`
+      );
+      for (const ref of scaffolded) {
+        console.error(`  - ${ref}`);
+      }
+      console.error(
+        '\nEdit the domain and auth type for each stub, then uncomment to enable auto-injection.'
+      );
     }
-    console.error(
-      '\nThese secrets are stored securely but won\'t be auto-injected until'
-    );
-    console.error('you configure the corresponding service in keyhole.yaml.');
+
+    if (skipped.length > 0) {
+      console.error(
+        `\n${skipped.length} secret(s) already configured in ${path.basename(configPath)} — skipped:`
+      );
+      for (const ref of skipped) {
+        console.error(`  - ${ref}`);
+      }
+    }
   }
 
   // Step 11: .gitignore check
@@ -290,17 +310,15 @@ async function cleanupFiles(
     if (!fileSecrets || fileSecrets.length === 0) continue;
 
     console.error(`\nClean up ${sf.filename}?`);
-    console.error('  [R] Replace values with placeholders (KEYHOLE_MANAGED)');
+    console.error('  \u26A0 Your secrets are safely stored. Use "npx keyhole list" to view them.');
+    console.error('  [R] Replace values with format-aware placeholders');
     console.error('  [D] Delete secret lines entirely');
-    console.error('  [S] Skip — leave file unchanged');
+    console.error('  [S] Skip \u2014 leave file unchanged (NOT RECOMMENDED)');
 
     const choice = await promptChoice('Choice (R/D/S): ', ['r', 'd', 's']);
     if (choice === 's') continue;
 
     const filePath = path.join(cwd, sf.filename);
-
-    // Create backup before modifying
-    createBackup(filePath);
 
     if (sf.format === 'env') {
       cleanupEnvFile(filePath, fileSecrets, choice);
@@ -308,7 +326,7 @@ async function cleanupFiles(
       cleanupJsonFile(filePath, fileSecrets, choice);
     }
 
-    console.error(`  ${sf.filename} updated (backup saved as ${sf.filename}.bak)`);
+    console.error(`  ${sf.filename} updated`);
   }
 }
 
@@ -339,20 +357,6 @@ async function promptChoice(
     };
     ask();
   });
-}
-
-/**
- * Create a backup of a file before modifying it.
- */
-function createBackup(filePath: string): void {
-  const bakPath = filePath + '.bak';
-  if (fs.existsSync(bakPath)) {
-    // Append timestamp to avoid overwriting existing backup
-    const timestamp = Math.floor(Date.now() / 1000);
-    fs.copyFileSync(filePath, `${bakPath}.${timestamp}`);
-  } else {
-    fs.copyFileSync(filePath, bakPath);
-  }
 }
 
 /**
@@ -409,7 +413,10 @@ function cleanupEnvFile(
     }
 
     const prefix = secret.entry.hasExport ? 'export ' : '';
-    const placeholder = 'KEYHOLE_MANAGED';
+    const placeholder = generatePlaceholder(
+      secret.matchedService || secret.secretRef,
+      secret.entry.value
+    );
 
     let replacement: string;
     switch (secret.entry.quoteStyle) {
@@ -467,7 +474,11 @@ function cleanupJsonFile(
     if (mode === 'd') {
       delete obj[lastKey];
     } else {
-      obj[lastKey] = 'KEYHOLE_MANAGED';
+      const candidate = secrets.find((c) => c.entry.key === keyPath);
+      obj[lastKey] = generatePlaceholder(
+        candidate?.matchedService || candidate?.secretRef || lastKey,
+        candidate?.entry.value
+      );
     }
   }
 
